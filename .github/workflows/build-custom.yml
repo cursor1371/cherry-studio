@@ -1,0 +1,73 @@
+name: Build Custom Windows
+
+on:
+  push:
+    branches:
+      - compat-v1.9.12
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: custom-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.27.0
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build application
+        run: pnpm build
+
+      - name: Package Windows x64
+        run: pnpm exec electron-builder --win --x64 --publish never
+
+      - name: Record build information
+        run: |
+          printf "Commit: %s\n" "$GITHUB_SHA" > build-info.txt
+          printf "Branch: %s\n" "$GITHUB_REF_NAME" >> build-info.txt
+          printf "Run: %s\n" "$GITHUB_RUN_NUMBER" >> build-info.txt
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: CherryStudio-custom-win-x64-${{ github.run_number }}
+          path: dist/*.exe
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Upload build information
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-info-${{ github.run_number }}
+          path: build-info.txt
+          retention-days: 7
