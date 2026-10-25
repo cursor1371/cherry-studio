@@ -79,3 +79,4 @@ test-results
 YOUR_MEMORY_FILE_PATH
 
 .sessions/
+.model-sdk-google/

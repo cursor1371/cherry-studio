@@ -11,6 +11,7 @@ import {
 } from '@renderer/components/Icons'
 import type { QuickPanelListItem } from '@renderer/components/QuickPanel'
 import { QuickPanelReservedSymbol } from '@renderer/components/QuickPanel'
+import { getModelProfile, getProfileEffort } from '@renderer/config/modelProfiles'
 import {
   isGemini3Model,
   isGeminiModel,
@@ -70,6 +71,7 @@ export const WebSearchProviderIcon = ({
 export const useWebSearchPanelController = (assistantId: string, quickPanelController: ToolQuickPanelController) => {
   const { t } = useTranslation()
   const { assistant, updateAssistant } = useAssistant(assistantId)
+  const profile = getModelProfile(assistant.model)
   const { providers } = useWebSearchProviders()
   const { setTimeoutTimer } = useTimer()
 
@@ -112,11 +114,10 @@ export const useWebSearchPanelController = (assistantId: string, quickPanelContr
       window.toast.error(t('error.model.not_exists'))
       return
     }
-    // Gemini 3+ supports combining built-in tools with function calling
+    // Profiles validate the actual injected tool set before sending, not the MCP mode.
+    // Keep the legacy Gemini restriction for models without a profile.
     if (
-      isGeminiWebSearchProvider(provider) &&
-      isGeminiModel(model) &&
-      !isGemini3Model(model) &&
+      !profile && isGeminiWebSearchProvider(provider) && isGeminiModel(model) && !isGemini3Model(model) &&
       isToolUseModeFunction(assistant) &&
       update.enableWebSearch &&
       getEffectiveMcpMode(assistant) !== 'disabled'
@@ -125,16 +126,19 @@ export const useWebSearchPanelController = (assistantId: string, quickPanelContr
       window.toast.warning(t('chat.mcp.warning.gemini_web_search'))
     }
     if (
-      isOpenAIWebSearchModel(model) &&
-      isGPT5SeriesReasoningModel(model) &&
       update.enableWebSearch &&
-      assistant.settings?.reasoning_effort === 'minimal'
+      (profile
+        ? profile.tools.unavailableWith.includes(getProfileEffort(profile, assistant.settings?.reasoning_effort))
+        : isOpenAIWebSearchModel(model) && isGPT5SeriesReasoningModel(model) &&
+          assistant.settings?.reasoning_effort === 'minimal')
     ) {
       update.enableWebSearch = false
-      window.toast.warning(t('chat.web_search.warning.openai'))
+      window.toast.warning(profile
+        ? t('models.profile.tools_effort', { defaultValue: '当前思考选项与原生工具不兼容，请更换选项或关闭工具。' })
+        : t('chat.web_search.warning.openai'))
     }
     setTimeoutTimer('updateSelectedWebSearchBuiltin', () => updateAssistant(update), 200)
-  }, [assistant, setTimeoutTimer, t, updateAssistant])
+  }, [assistant, profile, setTimeoutTimer, t, updateAssistant])
 
   const providerItems = useMemo<QuickPanelListItem[]>(() => {
     const isWebSearchModelEnabled = assistant.model && isWebSearchModel(assistant.model)
@@ -170,7 +174,7 @@ export const useWebSearchPanelController = (assistantId: string, quickPanelContr
     }
 
     return items
-  }, [assistant, providers, t, updateQuickPanelItem, updateToModelBuiltinWebSearch])
+  }, [assistant, profile, providers, t, updateQuickPanelItem, updateToModelBuiltinWebSearch])
 
   const openQuickPanel = useCallback(() => {
     quickPanelController.open({

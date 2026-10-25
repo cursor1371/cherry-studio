@@ -1,4 +1,5 @@
 import { ActionIconButton } from '@renderer/components/Buttons'
+import { getModelProfile, getProfileEffort } from '@renderer/config/modelProfiles'
 import { useAssistant } from '@renderer/hooks/useAssistant'
 import { useTimer } from '@renderer/hooks/useTimer'
 import { getEffectiveMcpMode } from '@renderer/types'
@@ -30,7 +31,17 @@ const UrlContextButton: FC<Props> = ({ assistantId }) => {
       'handleToggle',
       () => {
         const update = { ...assistant }
+        const profile = getModelProfile(assistant.model)
+        if (profile && urlContentNewState &&
+            profile.tools.unavailableWith.includes(getProfileEffort(profile, assistant.settings?.reasoning_effort))) {
+          window.toast.warning(t('models.profile.tools_effort', {
+            defaultValue: '当前思考选项与原生工具不兼容，请更换选项或关闭工具。'
+          }))
+          return
+        }
+        // Profiles defer mixed-tool validation to the actual request tool set.
         if (
+          !profile &&
           getEffectiveMcpMode(assistant) !== 'disabled' &&
           urlContentNewState === true &&
           isToolUseModeFunction(assistant)

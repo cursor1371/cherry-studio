@@ -1,5 +1,6 @@
 import { formatPrivateKey, hasProviderConfig, type StringKeys } from '@cherrystudio/ai-core/provider'
 import type { AppProviderId, AppProviderSettingsMap } from '@renderer/aiCore/types'
+import { getModelProfile, profileProviderIds } from '@renderer/config/modelProfiles'
 import {
   getAwsBedrockAccessKeyId,
   getAwsBedrockApiKey,
@@ -111,6 +112,34 @@ export function providerToAiSdkConfig(
 ): ProviderConfig | Promise<ProviderConfig> {
   const aiSdkProviderId = getAiSdkProviderId(actualProvider)
   const { baseURL, endpoint } = routeToEndpoint(actualProvider.apiHost)
+  const profile = getModelProfile(model, actualProvider)
+  if (profile) {
+    if (profile.protocol === 'openai' && profile.chatDialect === 'compatible') {
+      return {
+        providerId: 'profile-openai-compatible',
+        endpoint,
+        providerSettings: {
+          name: 'openaiCompatible',
+          supportsStructuredOutputs: profile.output?.type === 'json-schema',
+          includeUsage: isSupportStreamOptionsProvider(actualProvider)
+            ? store.getState().settings.openAI?.streamOptions?.includeUsage
+            : undefined,
+          baseURL,
+          apiKey: actualProvider.apiKey,
+          headers: { ...defaultAppHeaders(), ...actualProvider.extra_headers }
+        }
+      }
+    }
+    return {
+      providerId: profileProviderIds[profile.protocol],
+      endpoint,
+      providerSettings: {
+        baseURL,
+        apiKey: actualProvider.apiKey,
+        headers: { ...defaultAppHeaders(), ...actualProvider.extra_headers }
+      }
+    }
+  }
 
   const ctx: BuilderContext = {
     actualProvider,
@@ -151,7 +180,17 @@ export function getActualProvider(model: Model): Provider {
   return adaptProvider({ provider: getProviderByModel(model), model })
 }
 
-export function adaptProvider({ provider }: { provider: Provider; model?: Model }): Provider {
+export function adaptProvider({ provider, model }: { provider: Provider; model?: Model }): Provider {
+  const profile = getModelProfile(model, provider)
+  if (profile) {
+    const host = profile.protocol === 'anthropic' ? provider.anthropicApiHost || provider.apiHost : provider.apiHost
+    const appendVersion = !isWithTrailingSharp(host)
+    const base = appendVersion ? host.replace(/\/v1(?:beta)?\/?$/, '') : host
+    return {
+      ...cloneDeep(provider),
+      apiHost: formatApiHost(base, appendVersion, profile.protocol === 'gemini' ? 'v1beta' : 'v1')
+    }
+  }
   return formatProviderApiHost(cloneDeep(provider))
 }
 

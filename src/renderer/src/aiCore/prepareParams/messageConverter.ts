@@ -5,7 +5,6 @@
 
 import type { ReasoningPart } from '@ai-sdk/provider-utils'
 import { loggerService } from '@logger'
-import { isVisionModel } from '@renderer/config/models'
 import type { Message, Model } from '@renderer/types'
 import type {
   FileMessageBlock,
@@ -33,6 +32,7 @@ import type {
 import i18n from 'i18next'
 
 import { convertFileBlockToFilePart, convertFileBlockToTextPart } from './fileProcessor'
+import { supportsImageInput } from './modelCapabilities'
 
 const logger = loggerService.withContext('messageConverter')
 
@@ -317,7 +317,7 @@ async function convertMessageToAssistantModelMessage(
  */
 export async function convertMessagesToSdkMessages(messages: Message[], model: Model): Promise<ModelMessage[]> {
   const sdkMessages: ModelMessage[] = []
-  const isVision = isVisionModel(model)
+  const isVision = supportsImageInput(model)
 
   for (const message of messages) {
     const sdkMessage = await convertMessageToSdkParam(message, isVision, model)

@@ -4,6 +4,7 @@
  */
 
 import { loggerService } from '@logger'
+import { getModelProfile } from '@renderer/config/modelProfiles'
 import {
   isClaude46SeriesModel,
   isClaudeModelRejectsTemperature,
@@ -43,6 +44,11 @@ const logger = loggerService.withContext('modelParameters')
  * Otherwise, returns the temperature value.
  */
 export function getTemperature(assistant: Assistant, model: Model): number | undefined {
+  const profile = getModelProfile(model)
+  if (profile) {
+    const settings = getAssistantSettings(assistant)
+    return profile.sampling.temperature && settings.enableTemperature ? settings.temperature : undefined
+  }
   if (isGemini3Model(model)) {
     logger.info(`Gemini 3.x model ${model.id} uses default sampling settings, disabling temperature`)
     return undefined
@@ -102,6 +108,11 @@ export function getTemperature(assistant: Assistant, model: Model): number | und
  * Otherwise, returns the TopP value.
  */
 export function getTopP(assistant: Assistant, model: Model): number | undefined {
+  const profile = getModelProfile(model)
+  if (profile) {
+    const settings = getAssistantSettings(assistant)
+    return profile.sampling.topP && settings.enableTopP ? settings.topP : undefined
+  }
   if (isGemini3Model(model)) {
     logger.info(`Gemini 3.x model ${model.id} uses default sampling settings, disabling topP`)
     return undefined
@@ -158,6 +169,7 @@ export function filterStandardParams(
   standardParams: Partial<Record<AiSdkParam, any>>,
   model: Model
 ): Partial<Record<AiSdkParam, any>> {
+  if (getModelProfile(model)) return standardParams
   if (isGemini3Model(model) && 'topK' in standardParams) {
     const { topK, ...rest } = standardParams
     logger.info(`Gemini 3.x model ${model.id} uses default sampling settings, dropping topK=${topK} from custom params`)
@@ -183,6 +195,12 @@ export function getTimeout(model: Model): number {
 }
 
 export function getMaxTokens(assistant: Assistant, model: Model): number | undefined {
+  const profile = getModelProfile(model)
+  if (profile) {
+    const settings = getAssistantSettings(assistant)
+    // The final profile plugin accounts for Anthropic's added thinking budget once.
+    return settings.enableMaxTokens ? settings.maxTokens ?? profile.maxOutputTokens : profile.maxOutputTokens
+  }
   // NOTE: ai-sdk会把maxToken和budgetToken加起来
   const assistantSettings = getAssistantSettings(assistant)
   const enabledMaxTokens = assistantSettings.enableMaxTokens ?? false

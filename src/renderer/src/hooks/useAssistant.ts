@@ -1,4 +1,5 @@
 import { loggerService } from '@logger'
+import { getModelProfile, getProfileEffort } from '@renderer/config/modelProfiles'
 import {
   getThinkModelType,
   isSupportedReasoningEffortModel,
@@ -73,7 +74,7 @@ export function useAssistants() {
   }
 }
 
-export function useAssistant(id: string) {
+export function useAssistant(id: string, syncReasoningSettings = true) {
   const assistant = useAppSelector((state) => state.assistants.assistants.find((a) => a.id === id) as Assistant)
   const dispatch = useAppDispatch()
   const { defaultModel } = useDefaultModel()
@@ -83,13 +84,17 @@ export function useAssistant(id: string) {
     throw new Error(`Assistant model is not set for assistant with name: ${assistant?.name ?? 'unknown'}`)
   }
 
+  const profile = useAppSelector((state) => getModelProfile(model, state.llm.providers.find((p) => p.id === model.provider)))
+
   const normalizedTopics = useMemo(
     () => (Array.isArray(assistant?.topics) ? assistant.topics : []),
     [assistant?.topics]
   )
   const assistantWithModel = useMemo(
     () => ({ ...assistant, model, topics: normalizedTopics }),
-    [assistant, model, normalizedTopics]
+    // Invalidate memoized input-bar contexts when the provider profile changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [assistant, model, normalizedTopics, profile]
   )
 
   const settingsRef = useRef(assistant?.settings)
@@ -105,9 +110,16 @@ export function useAssistant(id: string) {
     [assistant?.id, dispatch]
   )
 
+  // Controlled Session buttons must not normalize the unrelated chat assistant settings.
   // 当model变化时，同步reasoning effort为模型支持的合法值
   useEffect(() => {
+    if (!syncReasoningSettings) return
     const settings = settingsRef.current
+    if (profile) {
+      const effort = getProfileEffort(profile, settings?.reasoning_effort)
+      if (settings?.reasoning_effort !== effort) updateAssistantSettings({ reasoning_effort: effort })
+      return
+    }
     if (settings) {
       const currentReasoningEffort = settings.reasoning_effort
       if (isSupportedThinkingTokenModel(model) || isSupportedReasoningEffortModel(model)) {
@@ -146,7 +158,7 @@ export function useAssistant(id: string) {
         })
       }
     }
-  }, [model, updateAssistantSettings])
+  }, [model, profile, syncReasoningSettings, updateAssistantSettings])
 
   return {
     assistant: assistantWithModel,

@@ -5,6 +5,7 @@
 
 import type OpenAI from '@cherrystudio/openai'
 import { loggerService } from '@logger'
+import { getModelProfile } from '@renderer/config/modelProfiles'
 import { getProviderByModel } from '@renderer/services/AssistantService'
 import type { FileMetadata, Message, Model } from '@renderer/types'
 import { FILE_TYPE } from '@renderer/types'
@@ -181,6 +182,8 @@ export async function handleLargeFileUpload(
   file: FileMetadata,
   model: Model
 ): Promise<(FilePart & { id?: string }) | null> {
+  // Profile Files APIs are intentionally not enabled; inline files still work.
+  if (getModelProfile(model)) return null
   const provider = getProviderByModel(model)
   const aiSdkId = getAiSdkProviderId(provider)
 
@@ -253,7 +256,8 @@ export async function convertFileBlockToFilePart(fileBlock: FileMessageBlock, mo
       // 处理MIME类型，特别是jpg->jpeg的转换（Anthropic要求）
       let mediaType = base64Data.mime
       const provider = getProviderByModel(model)
-      const aiSdkId = getAiSdkProviderId(provider)
+      const profile = getModelProfile(model, provider)
+      const aiSdkId = profile?.protocol ?? getAiSdkProviderId(provider)
 
       if (aiSdkId === 'anthropic' && mediaType === 'image/jpg') {
         mediaType = 'image/jpeg'

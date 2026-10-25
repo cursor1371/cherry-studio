@@ -5,7 +5,8 @@ import { loggerService } from '@logger'
 import { buildStreamTextParams } from '@renderer/aiCore/prepareParams'
 import type { AiSdkMiddlewareConfig } from '@renderer/aiCore/types/middlewareConfig'
 import { buildProviderOptions } from '@renderer/aiCore/utils/options'
-import { isDedicatedImageGenerationModel, isEmbeddingModel, isFunctionCallingModel } from '@renderer/config/models'
+import { getModelProfile } from '@renderer/config/modelProfiles'
+import { isDedicatedImageGenerationModel, isEmbeddingModel } from '@renderer/config/models'
 import { getStoreSetting } from '@renderer/hooks/useSettings'
 import i18n from '@renderer/i18n'
 import store from '@renderer/store'
@@ -166,7 +167,7 @@ export async function transformMessagesAndFetch(
 
     // 专用图像生成模型直接走 fetchImageGeneration
     const model = assistant.model || getDefaultModel()
-    if (isDedicatedImageGenerationModel(model)) {
+    if (!getModelProfile(model) && isDedicatedImageGenerationModel(model)) {
       await fetchImageGeneration({
         messages: uiMessages,
         assistant,
@@ -266,7 +267,7 @@ export async function fetchChatCompletion({
 
   // Safely fallback to prompt tool use when function calling is not supported by model.
   const usePromptToolUse =
-    isPromptToolUse(assistant) || (isToolUseModeFunction(assistant) && !isFunctionCallingModel(assistant.model))
+    isPromptToolUse(assistant) || (isToolUseModeFunction(assistant) && !isSupportedToolUse(assistant))
 
   const mcpMode = getEffectiveMcpMode(assistant)
   const middlewareConfig: AiSdkMiddlewareConfig = {

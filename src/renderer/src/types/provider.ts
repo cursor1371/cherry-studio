@@ -3,6 +3,7 @@ import type { Model } from '@types'
 import * as z from 'zod'
 
 import type { OpenAIVerbosity } from './aiCoreTypes'
+import type { ModelProfile } from './modelProfile'
 
 export const ProviderTypeSchema = z.enum([
   'openai',
@@ -110,6 +111,8 @@ export type Provider = {
   isAnthropicModel?: (m: Model) => boolean
   apiVersion?: string
   models: Model[]
+  /** Opt-in chat profiles, keyed by the exact transport model ID. */
+  modelProfiles?: Record<string, ModelProfile>
   enabled?: boolean
   isSystem?: boolean
   isAuthed?: boolean

@@ -3,6 +3,7 @@
  * 检查不同模型支持的功能（PDF输入、图片输入、大文件上传等）
  */
 
+import { getModelProfile } from '@renderer/config/modelProfiles'
 import { isVisionModel } from '@renderer/config/models'
 import { getProviderByModel } from '@renderer/services/AssistantService'
 import type { FileType, Model } from '@renderer/types'
@@ -51,13 +52,16 @@ function modelSupportValidator(
  * 检查模型是否支持原生图片输入
  */
 export function supportsImageInput(model: Model): boolean {
-  return isVisionModel(model)
+  return getModelProfile(model)?.vision ?? isVisionModel(model)
 }
 
 /**
  * 检查提供商是否支持大文件上传（如Gemini File API）
  */
 export function supportsLargeFileUpload(model: Model): boolean {
+  // Profiles select a generation protocol, not a Files API. Do not upload through
+  // the old provider type (or reuse remote file IDs from a different protocol).
+  if (getModelProfile(model)) return false
   // 基于AI SDK文档，以下模型或提供商支持大文件上传
   return modelSupportValidator(model, {
     supportedModels: ['qwen-long', 'qwen-doc'],
@@ -70,7 +74,10 @@ export function supportsLargeFileUpload(model: Model): boolean {
  */
 export function getFileSizeLimit(model: Model, fileType: FileType): number {
   const provider = getProviderByModel(model)
-  const aiSdkId = getAiSdkProviderId(provider)
+  const profile = getModelProfile(model, provider)
+  const aiSdkId = profile
+    ? profile.protocol === 'gemini' ? 'google' : profile.protocol
+    : getAiSdkProviderId(provider)
 
   // Anthropic PDF限制32MB
   if (aiSdkId === 'anthropic' && fileType === FILE_TYPE.DOCUMENT) {

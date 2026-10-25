@@ -13,13 +13,16 @@ import {
   MAX_TOOL_CALLS,
   MIN_TOOL_CALLS
 } from '@renderer/config/constant'
+import { getModelProfile } from '@renderer/config/modelProfiles'
 import { isEmbeddingModel, isRerankModel } from '@renderer/config/models'
+import { useDefaultModel } from '@renderer/hooks/useAssistant'
 import { useTimer } from '@renderer/hooks/useTimer'
 import { SettingRow } from '@renderer/pages/settings'
 import { DEFAULT_ASSISTANT_SETTINGS } from '@renderer/services/AssistantService'
+import { useAppSelector } from '@renderer/store'
 import type { Assistant, AssistantSettingCustomParameters, AssistantSettings, Model } from '@renderer/types'
 import { modalConfirm } from '@renderer/utils'
-import { Button, Col, Divider, Input, InputNumber, Row, Select, Slider, Switch, Tooltip } from 'antd'
+import { Alert, Button, Col, Divider, Input, InputNumber, Row, Select, Slider, Switch, Tooltip } from 'antd'
 import { isNull } from 'lodash'
 import { PlusIcon } from 'lucide-react'
 import type { FC } from 'react'
@@ -77,6 +80,13 @@ const AssistantModelSettings: FC<Props> = ({ assistant, updateAssistant, updateA
 
   const { t } = useTranslation()
   const { setTimeoutTimer } = useTimer()
+  const { defaultModel: globalDefaultModel } = useDefaultModel()
+  const activeModel = assistant.model ?? assistant.defaultModel ?? globalDefaultModel
+  const profile = useAppSelector((state) =>
+    getModelProfile(activeModel, state.llm.providers.find((provider) => provider.id === activeModel?.provider))
+  )
+  const allowTemperature = profile?.sampling.temperature ?? true
+  const allowTopP = profile?.sampling.topP ?? true
 
   const onTemperatureChange = (value) => {
     if (!isNaN(value as number)) {
@@ -274,7 +284,39 @@ const AssistantModelSettings: FC<Props> = ({ assistant, updateAssistant, updateA
         </HStack>
       </HStack>
       <Divider style={{ margin: '10px 0' }} />
+      {profile && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 10 }}
+          message={t('models.profile.sampling_status', {
+            defaultValue: '{{model}} 的能力配置已禁用：{{parameters}}。这些控件不会发送参数；原保存值保留，切换模型后可恢复。',
+            model: activeModel?.name,
+            parameters: (['temperature', 'topP', 'topK'] as const)
+              .filter((key) => !profile.sampling[key]).join(', ') || t('common.none', { defaultValue: '无' })
+          })}
+          description={t('models.profile.output_priority', {
+            defaultValue: '最大输出：顶层自定义 maxOutputTokens 优先，其次为已开启的助手限制，最后为能力配置默认值 {{limit}}。',
+            limit: profile.maxOutputTokens ?? (profile.protocol === 'anthropic' ? 16384 : t('models.profile.server_default', { defaultValue: '服务端默认' }))
+          })}
+        />
+      )}
 
+      {profile?.generation && Object.keys(profile.generation).length > 0 && (
+        <Alert type="info" showIcon style={{ marginBottom: 10 }}
+          message={t('models.profile.generation_defaults', {
+            defaultValue: '能力档默认生成参数：{{parameters}}。助手开关关闭表示不覆盖默认值；彻底禁止采样请关闭能力档中的 sampling 对应项，并删除 generation 中对应值。',
+            parameters: JSON.stringify(profile.generation)
+          })}
+        />
+      )}
+      {profile?.functionCalling === false && (
+        <Alert type="warning" showIcon style={{ marginBottom: 10 }}
+          message={t('models.profile.function_disabled', {
+            defaultValue: '能力档已禁用原生函数调用。需要使用 MCP 时，可选择提示词工具模式；这不代表原生 function calling 可用。'
+          })}
+        />
+      )}
       <SettingRow style={{ minHeight: 30 }}>
         <HStack alignItems="center">
           <Label>
@@ -285,13 +327,14 @@ const AssistantModelSettings: FC<Props> = ({ assistant, updateAssistant, updateA
           </Label>
         </HStack>
         <Switch
-          checked={enableTemperature}
+          checked={enableTemperature && allowTemperature}
+          disabled={!allowTemperature}
           onChange={(enabled) => {
             updateAssistantSettings({ enableTemperature: enabled })
           }}
         />
       </SettingRow>
-      {enableTemperature && (
+      {enableTemperature && allowTemperature && (
         <Row align="middle" gutter={12}>
           <Col span={20}>
             <Slider
@@ -332,13 +375,14 @@ const AssistantModelSettings: FC<Props> = ({ assistant, updateAssistant, updateA
           </Tooltip>
         </HStack>
         <Switch
-          checked={enableTopP}
+          checked={enableTopP && allowTopP}
+          disabled={!allowTopP}
           onChange={(enabled) => {
             updateAssistantSettings({ enableTopP: enabled })
           }}
         />
       </SettingRow>
-      {enableTopP && (
+      {enableTopP && allowTopP && (
         <Row align="middle" gutter={12}>
           <Col span={20}>
             <Slider

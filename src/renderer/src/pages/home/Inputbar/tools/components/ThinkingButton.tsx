@@ -10,8 +10,10 @@ import {
   MdiLightbulbQuestion
 } from '@renderer/components/Icons/SVGIcon'
 import { QuickPanelReservedSymbol, useQuickPanel } from '@renderer/components/QuickPanel'
+import { getModelProfile, getProfileEffort, getProfileEffortOptions } from '@renderer/config/modelProfiles'
 import {
   getThinkModelType,
+  isBuiltinFixedReasoningModel,
   isDoubaoThinkingAutoModel,
   isFixedReasoningModel,
   isGPT5SeriesReasoningModel,
@@ -45,20 +47,23 @@ const ThinkingButton: FC<Props> = ({
   const { t } = useTranslation()
   const quickPanelHook = useQuickPanel()
   const isControlled = controlledEffort !== undefined
-  const { assistant, updateAssistantSettings } = useAssistant(assistantId)
+  const { assistant, updateAssistantSettings } = useAssistant(assistantId, !isControlled)
 
+  const profile = isControlled ? undefined : getModelProfile(model)
   const currentReasoningEffort = useMemo(() => {
     if (isControlled) return controlledEffort
+    if (profile) return getProfileEffort(profile, assistant.settings?.reasoning_effort)
     return assistant.settings?.reasoning_effort || 'none'
-  }, [isControlled, controlledEffort, assistant.settings?.reasoning_effort])
+  }, [isControlled, controlledEffort, profile, assistant.settings?.reasoning_effort])
 
   // 确定当前模型支持的选项类型
   const modelType = useMemo(() => getThinkModelType(model), [model])
 
-  const isFixedReasoning = isFixedReasoningModel(model)
+  const isFixedReasoning = isControlled ? isBuiltinFixedReasoningModel(model) : isFixedReasoningModel(model)
 
   // 获取当前模型支持的选项
   const supportedOptions: ThinkingOption[] = useMemo(() => {
+    if (profile) return getProfileEffortOptions(profile)
     if (modelType === 'doubao') {
       if (isDoubaoThinkingAutoModel(model)) {
         return ['none', 'auto', 'high']
@@ -66,11 +71,20 @@ const ThinkingButton: FC<Props> = ({
       return ['none', 'high']
     }
     return MODEL_SUPPORTED_OPTIONS[modelType]
-  }, [model, modelType])
+  }, [model, modelType, profile])
 
   const onThinkingChange = useCallback(
     (option: ThinkingOption) => {
       const isEnabled = option !== 'none'
+
+      if (profile && profile.tools.unavailableWith.includes(option) &&
+          ((profile.tools.webSearch !== 'off' && !assistant.webSearchProviderId && assistant.enableWebSearch) ||
+            (profile.tools.urlContext !== 'off' && assistant.enableUrlContext))) {
+        window.toast.warning(t('models.profile.tools_effort', {
+          defaultValue: '当前思考选项与原生工具不兼容，请更换选项或关闭工具。'
+        }))
+        return
+      }
 
       if (isControlled) {
         onReasoningEffortChange?.(option)
@@ -86,6 +100,7 @@ const ThinkingButton: FC<Props> = ({
         return
       }
       if (
+        !profile &&
         isOpenAIWebSearchModel(model) &&
         isGPT5SeriesReasoningModel(model) &&
         assistant.enableWebSearch &&
@@ -100,7 +115,8 @@ const ThinkingButton: FC<Props> = ({
         qwenThinkMode: true
       })
     },
-    [isControlled, onReasoningEffortChange, updateAssistantSettings, assistant.enableWebSearch, model, t]
+    [isControlled, onReasoningEffortChange, updateAssistantSettings, assistant.enableWebSearch,
+      assistant.webSearchProviderId, assistant.enableUrlContext, model, profile, t]
   )
 
   const reasoningEffortOptionLabelMap = {
@@ -129,14 +145,17 @@ const ThinkingButton: FC<Props> = ({
     // 使用表中定义的选项创建UI选项
     return supportedOptions.map((option) => ({
       level: option,
-      label: reasoningEffortOptionLabelMap[option],
-      description: reasoningEffortDescriptionMap[option],
+      label: profile?.reasoning.find((choice) => choice.id === option)?.label ?? reasoningEffortOptionLabelMap[option],
+      description: profile && option !== 'default'
+        ? JSON.stringify(profile.reasoning.find((choice) => choice.id === option)?.parameters)
+        : reasoningEffortDescriptionMap[option],
       icon: ThinkingIcon({ option }),
       isSelected: currentReasoningEffort === option,
       action: () => onThinkingChange(option)
     }))
   }, [
     supportedOptions,
+    profile,
     reasoningEffortOptionLabelMap,
     reasoningEffortDescriptionMap,
     currentReasoningEffort,
@@ -172,7 +191,7 @@ const ThinkingButton: FC<Props> = ({
     }
 
     // If model has only single level (doesn't support multiple levels), directly disable thinking
-    if (isThinkingEnabled && supportedOptions.includes('none') && !hasMultipleLevels) {
+    if (!profile && isThinkingEnabled && supportedOptions.includes('none') && !hasMultipleLevels) {
       disableThinking()
       return
     }
@@ -184,7 +203,8 @@ const ThinkingButton: FC<Props> = ({
     supportedOptions,
     hasMultipleLevels,
     disableThinking,
-    isFixedReasoning
+    isFixedReasoning,
+    profile
   ])
 
   useEffect(() => {
@@ -214,7 +234,7 @@ const ThinkingButton: FC<Props> = ({
   // - Single-level models: show "Close" when thinking enabled, otherwise "Reasoning Effort"
   const ariaLabel = isFixedReasoning
     ? t('chat.input.thinking.label')
-    : hasMultipleLevels || !isThinkingEnabled
+    : profile || hasMultipleLevels || !isThinkingEnabled
       ? t('assistants.settings.reasoning_effort.label')
       : t('common.close')
 

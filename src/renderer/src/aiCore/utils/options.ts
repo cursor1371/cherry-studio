@@ -4,6 +4,7 @@ import type { GoogleGenerativeAIProviderOptions } from '@ai-sdk/google'
 import type { OpenAIResponsesProviderOptions } from '@ai-sdk/openai'
 import type { XaiResponsesProviderOptions } from '@ai-sdk/xai'
 import { loggerService } from '@logger'
+import { getModelProfile } from '@renderer/config/modelProfiles'
 import {
   getModelSupportedVerbosity,
   isAnthropicModel,
@@ -161,6 +162,11 @@ export function buildProviderOptions(
   providerOptions: Record<string, Record<string, JSONValue>>
   standardParams: Partial<Record<AiSdkParam, any>>
 } {
+  if (getModelProfile(model, actualProvider)) {
+    // The final profile plugin owns provider-specific parameters and tools.
+    const { standardParams } = extractAiSdkStandardParams(getCustomParameters(assistant))
+    return { providerOptions: {}, standardParams }
+  }
   const rawProviderId = getAiSdkProviderId(actualProvider)
   logger.debug('buildProviderOptions', { assistant, model, actualProvider, capabilities, rawProviderId })
   // 构建 provider 特定的选项

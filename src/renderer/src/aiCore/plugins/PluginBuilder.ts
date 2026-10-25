@@ -1,6 +1,7 @@
 import type { AiPlugin } from '@cherrystudio/ai-core'
 import { createPromptToolUsePlugin, providerToolPlugin } from '@cherrystudio/ai-core/built-in/plugins'
 import { loggerService } from '@logger'
+import { getModelProfile } from '@renderer/config/modelProfiles'
 import {
   isDeepSeekModel,
   isGemini3Model,
@@ -16,6 +17,7 @@ import type { AiSdkMiddlewareConfig } from '../types/middlewareConfig'
 import { getReasoningTagName } from '../utils/reasoning'
 import { createAnthropicCachePlugin } from './anthropicCachePlugin'
 import { createDeepseekDsmlParserPlugin } from './deepseekDsmlParserPlugin'
+import { createModelProfilePlugin } from './modelProfilePlugin'
 import { createNoThinkPlugin } from './noThinkPlugin'
 import { createOpenrouterReasoningPlugin } from './openrouterReasoningPlugin'
 import { createPdfCompatibilityPlugin } from './pdfCompatibilityPlugin'
@@ -37,7 +39,7 @@ const logger = loggerService.withContext('PluginBuilder')
 export interface BuildPluginsContext {
   provider: Provider
   model: Model
-  config: AiSdkMiddlewareConfig & { assistant: Assistant; topicId?: string }
+  config: AiSdkMiddlewareConfig & { assistant: Assistant; topicId?: string; callType?: string }
 }
 
 /**
@@ -45,6 +47,7 @@ export interface BuildPluginsContext {
  */
 export function buildPlugins({ provider, model, config }: BuildPluginsContext): AiPlugin[] {
   const plugins: AiPlugin<any, any>[] = []
+  const profile = getModelProfile(model, provider)
 
   if (config.topicId && getEnableDeveloperMode()) {
     // 0. 添加 telemetry 插件
@@ -71,7 +74,9 @@ export function buildPlugins({ provider, model, config }: BuildPluginsContext): 
 
   // 0.1 Reasoning extraction for OpenAI/Azure providers
   const providerType = provider.type
-  if (providerType === 'openai' || providerType === 'azure-openai' || model.endpoint_type === 'openai') {
+  const structuredOutput = config.callType === 'chat' && profile?.output && profile.output.type !== 'text'
+  if (!structuredOutput && (profile ? profile.protocol === 'openai' :
+    providerType === 'openai' || providerType === 'azure-openai' || model.endpoint_type === 'openai')) {
     const tagName = getReasoningTagName(model.id.toLowerCase())
     plugins.push(createReasoningExtractionPlugin({ tagName }))
   }
@@ -81,17 +86,17 @@ export function buildPlugins({ provider, model, config }: BuildPluginsContext): 
     plugins.push(createSimulateStreamingPlugin())
   }
 
-  if (provider.anthropicCacheControl?.tokenThreshold) {
+  if (provider.anthropicCacheControl?.tokenThreshold && (!profile || profile.protocol === 'anthropic')) {
     plugins.push(createAnthropicCachePlugin(provider))
   }
 
   // 0.3 OpenRouter reasoning redaction
-  if (provider.id === SystemProviderIds.openrouter) {
+  if (!profile && provider.id === SystemProviderIds.openrouter) {
     plugins.push(createOpenrouterReasoningPlugin())
   }
 
   // 0.3.1 DeepSeek DSML tool-call parser — converts leaked DSML tags into proper tool calls
-  if (isDeepSeekModel(model)) {
+  if (!profile && isDeepSeekModel(model)) {
     plugins.push(createDeepseekDsmlParserPlugin())
   }
 
@@ -102,6 +107,7 @@ export function buildPlugins({ provider, model, config }: BuildPluginsContext): 
 
   // 0.5 Qwen thinking control for providers without enable_thinking support
   if (
+    !profile &&
     !isOllamaProvider(provider) &&
     isSupportedThinkingTokenQwenModel(model) &&
     !isQwen35to39Model(model) &&
@@ -112,15 +118,15 @@ export function buildPlugins({ provider, model, config }: BuildPluginsContext): 
   }
 
   // 0.6 Skip Gemini3 thought signature for OpenAI-compatible API
-  if (isGemini3Model(model)) {
+  if (!profile && isGemini3Model(model)) {
     plugins.push(createSkipGeminiThoughtSignaturePlugin())
   }
 
   // 1. Provider 工具注入 — providerToolPlugin 自动按 provider 分发工具
-  if (config.enableWebSearch && config.webSearchPluginConfig) {
+  if (!profile && config.enableWebSearch && config.webSearchPluginConfig) {
     plugins.push(providerToolPlugin('webSearch', config.webSearchPluginConfig))
   }
-  if (config.enableUrlContext) {
+  if (!profile && config.enableUrlContext) {
     plugins.push(providerToolPlugin('urlContext', config.urlContextConfig))
   }
   // 2. 支持工具调用时添加搜索插件
@@ -142,6 +148,8 @@ export function buildPlugins({ provider, model, config }: BuildPluginsContext): 
       })
     )
   }
+
+  if (profile) plugins.push(createModelProfilePlugin(profile, config.assistant, config))
 
   logger.debug(
     'Final plugin list:',

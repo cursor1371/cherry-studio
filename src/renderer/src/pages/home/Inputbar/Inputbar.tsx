@@ -1,11 +1,10 @@
 import { loggerService } from '@logger'
+import { getModelProfile } from '@renderer/config/modelProfiles'
 import {
   isAutoEnableImageGenerationModel,
   isGenerateImageModel,
-  isGenerateImageModels,
   isMandatoryWebSearchModel,
   isVisionModel,
-  isVisionModels,
   isWebSearchModel
 } from '@renderer/config/models'
 import db from '@renderer/databases'
@@ -167,24 +166,27 @@ const InputbarInner: FC<InputbarInnerProps> = ({ assistant: initialAssistant, se
   const { pauseMessages } = useMessageOperations(topic)
   const loading = useTopicLoading(topic)
   const dispatch = useAppDispatch()
-  const isVisionAssistant = useMemo(() => isVisionModel(model), [model])
-  const isGenerateImageAssistant = useMemo(() => isGenerateImageModel(model), [model])
+  const providers = useAppSelector((state) => state.llm.providers)
   const { setTimeoutTimer } = useTimer()
   const isMultiSelectMode = useAppSelector((state) => state.runtime.chat.isMultiSelectMode)
 
-  const isVisionSupported = useMemo(
-    () =>
-      (mentionedModels.length > 0 && isVisionModels(mentionedModels)) ||
-      (mentionedModels.length === 0 && isVisionAssistant),
-    [mentionedModels, isVisionAssistant]
-  )
+  const isVisionSupported = useMemo(() => {
+    const models = mentionedModels.length ? mentionedModels : [model]
+    return models.every((entry) => {
+      const profile = scope === TopicType.Session ? undefined :
+        getModelProfile(entry, providers.find((provider) => provider.id === entry.provider))
+      return profile?.vision ?? isVisionModel(entry)
+    })
+  }, [mentionedModels, model, providers, scope])
 
-  const isGenerateImageSupported = useMemo(
-    () =>
-      (mentionedModels.length > 0 && isGenerateImageModels(mentionedModels)) ||
-      (mentionedModels.length === 0 && isGenerateImageAssistant),
-    [mentionedModels, isGenerateImageAssistant]
-  )
+  const isGenerateImageSupported = useMemo(() => {
+    const models = mentionedModels.length ? mentionedModels : [model]
+    return models.every((entry) => {
+      const profile = scope === TopicType.Session ? undefined :
+        getModelProfile(entry, providers.find((provider) => provider.id === entry.provider))
+      return !profile && isGenerateImageModel(entry)
+    })
+  }, [mentionedModels, model, providers, scope])
 
   const canAddImageFile = useMemo(() => {
     return isVisionSupported || isGenerateImageSupported
@@ -447,6 +449,12 @@ const InputbarInner: FC<InputbarInnerProps> = ({ assistant: initialAssistant, se
       updateAssistant({ ...assistant, webSearchProviderId: undefined })
     }
 
+    // Chat profiles do not implement image generation. Preserve the stored switch
+    // for when the profile is removed, but never auto-enable it on this path.
+    if (scope !== TopicType.Session && getModelProfile(model)) {
+      return
+    }
+
     // Auto-enable/disable image generation based on model capabilities
     if (isGenerateImageModel(model)) {
       if (isAutoEnableImageGenerationModel(model) && !assistant.enableGenerateImage) {
@@ -455,7 +463,7 @@ const InputbarInner: FC<InputbarInnerProps> = ({ assistant: initialAssistant, se
     } else if (assistant.enableGenerateImage) {
       updateAssistant({ ...assistant, enableGenerateImage: false })
     }
-  }, [assistant, model, updateAssistant])
+  }, [assistant, model, scope, updateAssistant])
 
   if (isMultiSelectMode) {
     return null

@@ -1,3 +1,4 @@
+import { getModelProfile } from '@renderer/config/modelProfiles'
 import { isAnthropicModel, isGeminiModel, isPureGenerateImageModel } from '@renderer/config/models'
 import { defineTool, registerTool, TopicType } from '@renderer/pages/home/Inputbar/types'
 import { getProviderByModel } from '@renderer/services/AssistantService'
@@ -10,6 +11,8 @@ const urlContextTool = defineTool({
   label: (t) => t('chat.input.url_context'),
   visibleInScopes: [TopicType.Chat],
   condition: ({ model }) => {
+    const profile = getModelProfile(model)
+    if (profile) return profile.tools.urlContext !== 'off'
     const provider = getProviderByModel(model)
     return (
       !!provider &&

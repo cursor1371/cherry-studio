@@ -342,6 +342,8 @@ export class AiSdkToChunkAdapter {
             [WEB_SEARCH_SOURCE.ZHIPU]: WEB_SEARCH_SOURCE.ZHIPU,
             [WEB_SEARCH_SOURCE.GROK]: WEB_SEARCH_SOURCE.GROK,
             xai: WEB_SEARCH_SOURCE.GROK,
+            'profile-openai': WEB_SEARCH_SOURCE.OPENAI_RESPONSE,
+            'profile-anthropic': WEB_SEARCH_SOURCE.ANTHROPIC,
             [WEB_SEARCH_SOURCE.WEBSEARCH]: WEB_SEARCH_SOURCE.WEBSEARCH
           }
           const source = (providerName && sourceMap[providerName]) || WEB_SEARCH_SOURCE.AISDK

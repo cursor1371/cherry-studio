@@ -7,6 +7,7 @@
 import type { LanguageModelV3FilePart, LanguageModelV3Message } from '@ai-sdk/provider'
 import { definePlugin } from '@cherrystudio/ai-core/core/plugins'
 import { loggerService } from '@logger'
+import { getModelProfile } from '@renderer/config/modelProfiles'
 import { isAnthropicModel, isGeminiModel } from '@renderer/config/models'
 import { isOpenAILLMModel } from '@renderer/config/models/openai'
 import type { Model, Provider, ProviderType } from '@renderer/types'
@@ -42,6 +43,12 @@ function isPdfFilePart(part: ContentPart): part is LanguageModelV3FilePart & { m
 }
 
 function supportsNativePdf(provider: Provider, model: Model): boolean {
+  const profile = getModelProfile(model, provider)
+  if (profile) {
+    // Explicit opt-in also supports channels using Chat Completions file parts.
+    return profile.nativePdf ?? profile.protocol !== 'openai'
+  }
+
   if (PDF_FORCE_TEXT_EXTRACTION_PROVIDER_IDS.has(provider.id)) {
     return false
   }

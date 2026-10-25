@@ -1,3 +1,4 @@
+import { getModelProfile } from '@renderer/config/modelProfiles'
 import { getProviderByModel } from '@renderer/services/AssistantService'
 import type { Model } from '@renderer/types'
 import { SystemProviderIds } from '@renderer/types'
@@ -40,6 +41,9 @@ export function isWebSearchModel(model: Model): boolean {
   if (!model || isEmbeddingModel(model) || isRerankModel(model) || isTextToImageModel(model)) {
     return false
   }
+
+  const profile = getModelProfile(model)
+  if (profile) return profile.tools.webSearch !== 'off'
 
   if (isUserSelectedModelType(model, 'web_search') !== undefined) {
     return isUserSelectedModelType(model, 'web_search')!

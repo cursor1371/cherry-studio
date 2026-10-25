@@ -1,3 +1,4 @@
+import { getModelProfile, getProfileEffortOptions } from '@renderer/config/modelProfiles'
 import type {
   Model,
   ReasoningEffortConfig,
@@ -313,6 +314,9 @@ export const getModelSupportedReasoningEffortOptions = (
 ): ReasoningEffortOption[] | undefined => {
   if (!model) return undefined
 
+  const profile = getModelProfile(model)
+  if (profile) return profile.reasoning.length ? getProfileEffortOptions(profile) : undefined
+
   const { idResult, nameResult } = withModelIdAndNameAsId(model, _getModelSupportedReasoningEffortOptions)
   return idResult ?? nameResult
 }
@@ -336,12 +340,20 @@ function _isSupportedThinkingTokenModel(model: Model): boolean {
 // TODO: rename it
 export function isSupportedThinkingTokenModel(model?: Model): boolean {
   if (!model) return false
+  const profile = getModelProfile(model)
+  if (profile) return profile.reasoning.length > 0
   const { idResult, nameResult } = withModelIdAndNameAsId(model, _isSupportedThinkingTokenModel)
   return idResult || nameResult
 }
 
 // TODO: it should be merged in isSupportedThinkingTokenModel
 export function isSupportedReasoningEffortModel(model?: Model): boolean {
+  const profile = getModelProfile(model)
+  if (profile) return profile.reasoning.length > 0
+  return isBuiltinSupportedReasoningEffortModel(model)
+}
+
+function isBuiltinSupportedReasoningEffortModel(model?: Model): boolean {
   if (!model) {
     return false
   }
@@ -853,6 +865,15 @@ export function isReasoningModel(model?: Model): boolean {
   if (!model || isEmbeddingModel(model) || isRerankModel(model) || isTextToImageModel(model)) {
     return false
   }
+  const profile = getModelProfile(model)
+  return profile ? profile.reasoning.length > 0 : isBuiltinReasoningModel(model)
+}
+
+/** Agent sessions use the original model rules, not renderer chat profiles. */
+export function isBuiltinReasoningModel(model?: Model): boolean {
+  if (!model || isEmbeddingModel(model) || isRerankModel(model) || isTextToImageModel(model)) {
+    return false
+  }
 
   if (isUserSelectedModelType(model, 'reasoning') !== undefined) {
     return isUserSelectedModelType(model, 'reasoning')!
@@ -981,6 +1002,11 @@ export const findTokenLimit = (modelId: string): { min: number; max: number } | 
  */
 export const isFixedReasoningModel = (model: Model) =>
   isReasoningModel(model) && !isSupportedThinkingTokenModel(model) && !isSupportedReasoningEffortModel(model)
+
+export function isBuiltinFixedReasoningModel(model: Model): boolean {
+  const { idResult, nameResult } = withModelIdAndNameAsId(model, _isSupportedThinkingTokenModel)
+  return isBuiltinReasoningModel(model) && !idResult && !nameResult && !isBuiltinSupportedReasoningEffortModel(model)
+}
 
 // https://platform.minimaxi.com/docs/guides/text-m2-function-call#openai-sdk
 // https://docs.z.ai/guides/capabilities/thinking-mode

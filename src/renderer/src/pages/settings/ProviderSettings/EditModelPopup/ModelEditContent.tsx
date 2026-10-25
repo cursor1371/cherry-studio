@@ -30,6 +30,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
+import ModelProfileEditor from './ModelProfileEditor'
+
 interface ModelEditContentProps {
   provider: Provider
   model: Model
@@ -438,6 +440,7 @@ const ModelEditContent: FC<ModelEditContentProps & ModalProps> = ({ provider, mo
           </div>
         )}
       </Form>
+      <ModelProfileEditor key={`${model.provider}:${model.id}`} model={model} />
     </Modal>
   )
 }

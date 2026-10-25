@@ -9,6 +9,7 @@ import { extensionRegistry } from '@cherrystudio/ai-core/provider'
 import { loggerService } from '@logger'
 import type { AppProviderId } from '@renderer/aiCore/types'
 import { MAX_TOOL_CALLS, MIN_TOOL_CALLS } from '@renderer/config/constant'
+import { getModelProfile } from '@renderer/config/modelProfiles'
 import {
   isAnthropicModel,
   isFixedReasoningModel,
@@ -126,6 +127,7 @@ export async function buildStreamTextParams(
   const finalSignal = AbortSignal.any(signals)
 
   const model = assistant.model || getDefaultModel()
+  const profile = getModelProfile(model, provider)
   const aiSdkProviderId = getAiSdkProviderId(provider)
 
   // 这三个变量透传出来，交给下面启用插件/中间件
@@ -142,18 +144,18 @@ export async function buildStreamTextParams(
   const enableWebSearch =
     !hasExternalSearch &&
     ((assistant.enableWebSearch && isWebSearchModel(model)) ||
-      isOpenRouterBuiltInWebSearchModel(model) ||
-      model.id.includes('sonar'))
+      (!profile && (isOpenRouterBuiltInWebSearchModel(model) || model.id.includes('sonar'))))
 
   // Validate provider and model support to prevent stale state from triggering urlContext
   const enableUrlContext = !!(
     assistant.enableUrlContext &&
-    isSupportUrlContextProvider(provider) &&
-    !isPureGenerateImageModel(model) &&
-    (isGeminiModel(model) || isAnthropicModel(model))
+    (profile
+      ? profile.tools.urlContext !== 'off'
+      : isSupportUrlContextProvider(provider) && !isPureGenerateImageModel(model) &&
+        (isGeminiModel(model) || isAnthropicModel(model)))
   )
 
-  const enableGenerateImage = !!(isGenerateImageModel(model) && assistant.enableGenerateImage)
+  const enableGenerateImage = !!(!profile && isGenerateImageModel(model) && assistant.enableGenerateImage)
 
   const tools = setupToolsConfig(mcpTools, options.allowedTools)
 
@@ -175,7 +177,7 @@ export async function buildStreamTextParams(
   // - urlContextPlugin: 根据 provider 的 toolFactories.urlContext 自动注入
   // parameterBuilder 只构建 config，传给 plugin
   let webSearchPluginConfig: WebSearchPluginConfig | undefined = undefined
-  if (enableWebSearch) {
+  if (enableWebSearch && !profile) {
     if (extensionRegistry.has(aiSdkProviderId)) {
       webSearchPluginConfig = buildProviderBuiltinWebSearchConfig(aiSdkProviderId, webSearchConfig, model)
     } else if (isAIGatewayProvider(provider) || SystemProviderIds.gateway === provider.id) {
@@ -188,7 +190,7 @@ export async function buildStreamTextParams(
 
   let headers = inputHeaders
 
-  if (isAnthropicModel(model) && !isAwsBedrockProvider(provider)) {
+  if (!profile && isAnthropicModel(model) && !isAwsBedrockProvider(provider)) {
     const betaHeaders = addAnthropicHeaders(assistant, model)
     // Only add the anthropic-beta header if there are actual beta headers to include
     if (betaHeaders.length > 0) {

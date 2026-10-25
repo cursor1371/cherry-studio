@@ -1,3 +1,4 @@
+import { getModelProfile } from '@renderer/config/modelProfiles'
 import { isFunctionCallingModel } from '@renderer/config/models'
 import type { Assistant } from '@renderer/types'
 
@@ -21,7 +22,8 @@ export function isPromptToolUse(assistant: Assistant) {
  */
 export function isSupportedToolUse(assistant: Assistant) {
   if (assistant.model) {
-    return isFunctionCallingModel(assistant.model) && isToolUseModeFunction(assistant)
+    const supported = getModelProfile(assistant.model)?.functionCalling ?? isFunctionCallingModel(assistant.model)
+    return supported && isToolUseModeFunction(assistant)
   }
 
   return false

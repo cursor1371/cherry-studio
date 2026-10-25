@@ -1,6 +1,7 @@
 import { createExecutor } from '@cherrystudio/ai-core'
 import type { generateImageResult } from '@cherrystudio/ai-core/core/runtime/types'
 import { loggerService } from '@logger'
+import { getModelProfile } from '@renderer/config/modelProfiles'
 import { getEnableDeveloperMode } from '@renderer/hooks/useSettings'
 import { addSpan, endSpan } from '@renderer/services/SpanManagerService'
 import type { StartSpanParams } from '@renderer/trace/types/ModelSpanEntity'
@@ -250,11 +251,15 @@ export default class AiProvider {
     // 创建带有中间件的执行器
     if (middlewareConfig.onChunk) {
       const accumulate = this.model!.supported_text_delta !== false // true and undefined
+      const profileOutput = middlewareConfig.callType === 'chat'
+        ? getModelProfile(this.model, this.actualProvider)?.output?.type : undefined
+      const structuredOutput = profileOutput === 'json' || profileOutput === 'json-schema'
       const adapter = new AiSdkToChunkAdapter(
         middlewareConfig.onChunk,
         middlewareConfig.mcpTools,
         accumulate,
-        middlewareConfig.enableWebSearch,
+        // Link-to-Markdown conversion can corrupt JSON escaping; source events still render normally.
+        middlewareConfig.enableWebSearch && !structuredOutput,
         undefined,
         undefined,
         providerConfig.providerId,

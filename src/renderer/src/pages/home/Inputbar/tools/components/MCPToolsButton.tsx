@@ -1,6 +1,7 @@
 import { ActionIconButton } from '@renderer/components/Buttons'
 import type { QuickPanelListItem } from '@renderer/components/QuickPanel'
 import { QuickPanelReservedSymbol, useQuickPanel } from '@renderer/components/QuickPanel'
+import { getModelProfile } from '@renderer/config/modelProfiles'
 import { isGemini3Model, isGeminiModel } from '@renderer/config/models'
 import { useAssistant } from '@renderer/hooks/useAssistant'
 import { useMCPServers } from '@renderer/hooks/useMCPServers'
@@ -136,10 +137,9 @@ const MCPToolsButton: FC<Props> = ({ quickPanel, setInputValue, resizeTextArea, 
       setTimeoutTimer(
         'updateMcpMode',
         () => {
-          updateAssistant({
-            ...assistant,
-            mcpMode: mode
-          })
+          // A mode/server selection does not prove that function tools are available.
+          // Profile requests validate the resolved tools without changing user switches.
+          updateAssistant({ ...assistant, mcpMode: mode })
         },
         200
       )
@@ -156,7 +156,8 @@ const MCPToolsButton: FC<Props> = ({ quickPanel, setInputValue, resizeTextArea, 
         update.mcpServers = [...mcpServers, server]
       }
 
-      if (update.mcpServers.length > 0 && isGeminiModel(model) && isToolUseModeFunction(assistant)) {
+      const profile = getModelProfile(model)
+      if (!profile && update.mcpServers.length > 0 && isGeminiModel(model) && isToolUseModeFunction(assistant)) {
         const provider = getProviderByModel(model)
         if (isSupportUrlContextProvider(provider) && assistant.enableUrlContext) {
           window.toast.warning(t('chat.mcp.warning.url_context'))

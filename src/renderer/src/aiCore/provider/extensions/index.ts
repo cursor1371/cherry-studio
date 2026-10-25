@@ -27,6 +27,7 @@ import { createVoyage, type VoyageProviderSettings } from 'voyage-ai-provider'
 
 import { type AihubmixProviderSettings, createAihubmix } from '../custom/aihubmix-provider'
 import { createNewApi, type NewApiProviderSettings } from '../custom/newapi-provider'
+import { modelProfileExtensions } from './modelProfile'
 
 /**
  * Google Vertex AI Extension
@@ -217,6 +218,7 @@ export const VoyageExtension = ProviderExtension.create({
  * 所有项目特定的 Extensions
  */
 export const extensions = [
+  ...modelProfileExtensions,
   GoogleVertexExtension,
   GoogleVertexAnthropicExtension,
   GitHubCopilotExtension,
