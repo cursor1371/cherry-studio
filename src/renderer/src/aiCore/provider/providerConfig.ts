@@ -108,11 +108,12 @@ type ConfigBuilderEntry = {
 
 export function providerToAiSdkConfig(
   actualProvider: Provider,
-  model: Model
+  model: Model,
+  { useModelProfile = true }: { useModelProfile?: boolean } = {}
 ): ProviderConfig | Promise<ProviderConfig> {
   const aiSdkProviderId = getAiSdkProviderId(actualProvider)
   const { baseURL, endpoint } = routeToEndpoint(actualProvider.apiHost)
-  const profile = getModelProfile(model, actualProvider)
+  const profile = useModelProfile ? getModelProfile(model, actualProvider) : undefined
   if (profile) {
     if (profile.protocol === 'openai' && profile.chatDialect === 'compatible') {
       return {

@@ -3,6 +3,7 @@ import type { generateImageResult } from '@cherrystudio/ai-core/core/runtime/typ
 import { loggerService } from '@logger'
 import { getModelProfile } from '@renderer/config/modelProfiles'
 import { getEnableDeveloperMode } from '@renderer/hooks/useSettings'
+import { getProviderByModel } from '@renderer/services/AssistantService'
 import { addSpan, endSpan } from '@renderer/services/SpanManagerService'
 import type { StartSpanParams } from '@renderer/trace/types/ModelSpanEntity'
 import type { Assistant, EditImageParams, GenerateImageParams, Model, Provider } from '@renderer/types'
@@ -12,7 +13,7 @@ import { buildClaudeCodeSystemModelMessage } from '@shared/anthropic'
 
 import AiSdkToChunkAdapter from './chunk/AiSdkToChunkAdapter'
 import { buildPlugins } from './plugins/PluginBuilder'
-import { adaptProvider, getActualProvider, providerToAiSdkConfig } from './provider/providerConfig'
+import { adaptProvider, providerToAiSdkConfig } from './provider/providerConfig'
 import { listModels } from './services/listModels'
 import type { AppProviderSettingsMap, CompletionsResult, ProviderConfig } from './types'
 import type { AiSdkMiddlewareConfig } from './types/middlewareConfig'
@@ -27,8 +28,10 @@ export type AiProviderConfig = AiSdkMiddlewareConfig & {
 }
 
 export default class AiProvider {
+  // Only completions use this config. Other operations resolve the original channel independently.
   private config?: ProviderConfig
-  private actualProvider: Provider
+  private readonly sourceProvider: Provider
+  private readonly actualProvider: Provider
   private model?: Model
 
   /**
@@ -41,7 +44,7 @@ export default class AiProvider {
    * **Important behavior notes**:
    *
    * 1. When called with `(model)`:
-   *    - Calls `getActualProvider(model)` to retrieve and format the provider
+   *    - Retrieves the model's provider and formats it for text completions
    *    - URL will be automatically formatted via `formatProviderApiHost`, adding version suffixes like `/v1`
    *
    * 2. When called with `(model, provider)`:
@@ -71,15 +74,13 @@ export default class AiProvider {
     if (this.isModel(modelOrProvider)) {
       // 传入的是 Model
       this.model = modelOrProvider
-      this.actualProvider = provider
-        ? adaptProvider({ provider, model: modelOrProvider })
-        : getActualProvider(modelOrProvider)
-      // 注意：config 可能是同步值或 Promise，在 completions() 中会统一处理
-      const configOrPromise = providerToAiSdkConfig(this.actualProvider, modelOrProvider)
-      this.config = configOrPromise instanceof Promise ? undefined : configOrPromise
+      this.sourceProvider = provider ?? getProviderByModel(modelOrProvider)
+      this.actualProvider = adaptProvider({ provider: this.sourceProvider, model: modelOrProvider })
+      // Resolve SDK settings only when an operation runs; do not initialize a chat SDK for image/embedding calls.
     } else {
       // 传入的是 Provider
-      this.actualProvider = adaptProvider({ provider: modelOrProvider })
+      this.sourceProvider = modelOrProvider
+      this.actualProvider = adaptProvider({ provider: this.sourceProvider })
       // model为可选，某些操作（如fetchModels）不需要model
     }
   }
@@ -101,9 +102,8 @@ export default class AiProvider {
       throw new Error('Model is required for completions. Please use constructor with model parameter.')
     }
 
-    // Config is now set in constructor, ApiService handles key rotation before passing provider
+    // ApiService handles key rotation before passing provider. Cache only text SDK settings.
     if (!this.config) {
-      // If config wasn't set in constructor (when provider only), generate it now
       this.config = await Promise.resolve(providerToAiSdkConfig(this.actualProvider, this.model))
     }
     logger.debug('Using provider config for completions', this.config)
@@ -326,7 +326,7 @@ export default class AiProvider {
    * 使用 ModelListService 统一处理各 Provider 的模型列表获取
    */
   public async models(): Promise<Model[]> {
-    return await listModels(this.actualProvider)
+    return await listModels(adaptProvider({ provider: this.sourceProvider }))
   }
 
   /**
@@ -334,16 +334,9 @@ export default class AiProvider {
    * 使用 AI SDK embedMany 测试获取维度
    */
   public async getEmbeddingDimensions(model: Model): Promise<number> {
-    // 确保 config 已定义
-    if (!this.config) {
-      this.config = await Promise.resolve(providerToAiSdkConfig(this.actualProvider, model))
-    }
-
-    const executor = await createExecutor<AppProviderSettingsMap>(
-      this.config.providerId,
-      this.config.providerSettings,
-      []
-    )
+    const provider = adaptProvider({ provider: this.sourceProvider })
+    const config = await providerToAiSdkConfig(provider, model, { useModelProfile: false })
+    const executor = await createExecutor<AppProviderSettingsMap>(config.providerId, config.providerSettings, [])
 
     // 使用 AI SDK embedMany 测试获取维度
     const result = await executor.embedMany({
@@ -354,24 +347,17 @@ export default class AiProvider {
     return result.embeddings[0].length
   }
 
-  /**
-   * 懒加载初始化 config
-   * 当 constructor 只传入 provider 时，config 不会被初始化
-   * 此方法根据 modelId 从 provider 的 models 中查找真实 Model 并生成 config
-   */
-  private async ensureConfig(modelId: string): Promise<void> {
-    if (this.config) {
-      return
-    }
-
-    // 从 provider 的 models 中查找真实的 model
-    const model = this.actualProvider.models.find((m) => getLowerBaseModelName(m.id) === getLowerBaseModelName(modelId))
+  /** Resolve image settings from the original channel, never from the text config cache. */
+  private async getImageConfig(modelId: string): Promise<ProviderConfig> {
+    const model = (this.model?.id === modelId ? this.model : undefined)
+      ?? this.sourceProvider.models.find((entry) => entry.id === modelId)
+      ?? this.sourceProvider.models.find((entry) => getLowerBaseModelName(entry.id) === getLowerBaseModelName(modelId))
     if (!model) {
-      throw new Error(`Model "${modelId}" not found in provider "${this.actualProvider.id}"`)
+      throw new Error(`Model "${modelId}" not found in provider "${this.sourceProvider.id}"`)
     }
 
-    this.actualProvider = adaptProvider({ provider: this.actualProvider, model })
-    this.config = await Promise.resolve(providerToAiSdkConfig(this.actualProvider, model))
+    const provider = adaptProvider({ provider: this.sourceProvider })
+    return await providerToAiSdkConfig(provider, model, { useModelProfile: false })
   }
 
   /**
@@ -379,8 +365,7 @@ export default class AiProvider {
    * 使用现代化 AI SDK 实现，不再 fallback 到 legacy
    */
   public async generateImage(params: GenerateImageParams): Promise<string[]> {
-    await this.ensureConfig(params.model)
-    return await this.modernGenerateImage(params, this.config!)
+    return await this.modernGenerateImage(params, await this.getImageConfig(params.model))
   }
 
   /**
@@ -388,8 +373,7 @@ export default class AiProvider {
    * 内部使用 AI SDK 的 generateImage，通过 prompt.images 参数实现编辑功能
    */
   public async editImage(params: EditImageParams): Promise<string[]> {
-    await this.ensureConfig(params.model)
-    return await this.modernEditImage(params, this.config!)
+    return await this.modernEditImage(params, await this.getImageConfig(params.model))
   }
 
   /**

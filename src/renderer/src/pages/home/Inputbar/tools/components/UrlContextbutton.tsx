@@ -32,7 +32,7 @@ const UrlContextButton: FC<Props> = ({ assistantId }) => {
       () => {
         const update = { ...assistant }
         const profile = getModelProfile(assistant.model)
-        if (profile && urlContentNewState &&
+        if (profile && profile.tools.choice !== 'none' && urlContentNewState &&
             profile.tools.unavailableWith.includes(getProfileEffort(profile, assistant.settings?.reasoning_effort))) {
           window.toast.warning(t('models.profile.tools_effort', {
             defaultValue: '当前思考选项与原生工具不兼容，请更换选项或关闭工具。'

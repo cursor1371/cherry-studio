@@ -114,8 +114,8 @@ export function createModelProfilePlugin(
       // Cherry's existing renderer. Auxiliary calls (title/summary/check) keep their output contract.
       // The prompt plugin has already collected MCP, search, knowledge and memory
       // tools here. The initial config.mcpTools list does not include injected tools.
-      if (config.callType === 'chat' && profile.output && profile.output.type !== 'text' &&
-          Object.keys(requestContext.mcpTools ?? {}).length > 0) {
+      const hasPromptTools = Object.keys(requestContext.mcpTools ?? {}).length > 0
+      if (config.callType === 'chat' && profile.output && profile.output.type !== 'text' && hasPromptTools) {
         throw new Error(t('models.profile.json_prompt_tools', {
           defaultValue: 'JSON 输出不能与提示词工具混用（包括 MCP、外部搜索、知识库和记忆工具），请改用函数调用或关闭这些工具。'
         }))
@@ -162,7 +162,7 @@ export function createModelProfilePlugin(
       next.maxOutputTokens = total
 
       const choice = params.toolChoice ?? (config.callType === 'chat' ? profile.tools.choice : undefined)
-      if (config.isPromptToolUse && choice !== undefined && choice !== 'auto') {
+      if (hasPromptTools && choice !== undefined && choice !== 'auto') {
         throw new Error('Model profile: tool choice controls native tools, not prompt-based tool use')
       }
       const native: ToolSet = {}

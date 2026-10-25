@@ -4,7 +4,7 @@
 
 本修改用于私人 Fork 的普通助手聊天：填真实模型 ID，选择接口协议，显式配置思考选项与原生工具。不通过伪造模型 ID 或扩大系列正则进行识别。
 
-未配置能力档的模型继续使用原版供应商实现。新版供应商 SDK 使用 npm 别名并存，不替换旧版图像、嵌入、重排供应商及原补丁。共享 `ai` 和 provider-utils 有同代更新，因此仍存在需要运行验证的公共依赖风险，不能承诺零回归。
+未配置能力档的模型继续使用原版供应商实现。新版供应商 SDK 使用 npm 别名并存，不替换旧版图像、嵌入、重排供应商及原补丁。AiProvider 仅为文本 completions 使用能力档；独立图像生成/编辑、嵌入维度检查和模型列表均从原始渠道重新解析，不复用聊天 SDK、地址或配置缓存。同一实例先后执行不同用途也不覆盖彼此的配置。共享 `ai` 和 provider-utils 有同代更新，因此仍存在需要运行验证的公共依赖风险，不能承诺零回归。
 
 不包含主进程 Agent/API Server、图像生成、实时音频、新工具平台或数据库改造。启用聊天能力档后，图像生成按钮隐藏，跳过自动开启；原有 enableGenerateImage 保存值不删除，清除能力档后恢复原判断。视觉图片输入不受此限制。没有重写历史消息持久化，不能宣称完整保存所有新协议的 thinking signature、encrypted reasoning、phase 或原生工具结果。一次 AI SDK 调用内部的工具续轮与从数据库重建下一轮历史不是同一件事。
 
@@ -123,7 +123,7 @@ API 地址沿用渠道配置。默认补 `/v1`，Gemini 补 `/v1beta`；末尾 `
 
 userLocation 为 `{ "type": "approximate", "country": "US" }` 等 SDK 结构，city/region/timezone 可选。时间范围使用 ISO UTC 字符串。不认识的工具字段会在保存/发送前报错。
 
-工具选择：`tools.choice` 可填 auto、none、required，或 `{"type":"tool","toolName":"webSearch"}`。强制选择需要当前请求中实际存在该工具，不能指定关闭的搜索；Anthropic 思考模式不允许强制工具选择。required 会约束每个 SDK 步骤，可能持续调用到现有步骤上限，请慎用。none 会移除实际工具声明，优先于聊天工具开关（Google 原生工具分支不可靠地处理 none，因此不能只传一个选择字段）。Gemini 的强制选择仅适用于函数工具，不用于 Search/URL Context。提示词工具模式不支持此处非 auto 的选择；JSON 输出不能与实际提示词工具同时使用（包括 MCP、外部搜索、知识库和记忆注入的工具）。插件检查提示词转换后上下文中的实际工具，不只检查原始 MCP 列表。需要这些工具时，应改用函数调用模式或文本输出。
+工具选择：`tools.choice` 可填 auto、none、required，或 `{"type":"tool","toolName":"webSearch"}`。强制选择需要当前请求中实际存在该工具，不能指定关闭的搜索；Anthropic 思考模式不允许强制工具选择。required 会约束每个 SDK 步骤，可能持续调用到现有步骤上限，请慎用。none 会移除实际工具声明，优先于聊天工具开关（Google 原生工具分支不可靠地处理 none，因此不能只传一个选择字段）。Gemini 的强制选择仅适用于函数工具，不用于 Search/URL Context。实际存在提示词工具时不支持此处非 auto 的选择；只有模式开关、没有实际提示词工具时不会误报，原生工具仍按所选协议校验。JSON 输出不能与实际提示词工具同时使用（包括 MCP、外部搜索、知识库和记忆注入的工具）。插件检查提示词转换后上下文中的实际工具，不只检查原始 MCP 列表。需要这些工具时，应改用函数调用模式或文本输出。
 
 `tools.parallel` 为可选布尔值，映射 OpenAI parallelToolCalls / compatible parallel_tool_calls / Anthropic disableParallelToolUse 的反值。Gemini 适配器没有此开关，保存时拒绝。省略时不覆盖 SDK 默认。不要同时在 options 另写并行参数。
 
@@ -148,7 +148,7 @@ SDK 中未被原补丁覆盖的型号约束（例如部分服务等级、推理�
 - `tools.webSearch`: off/default，Anthropic 还可选 20250305/20260209。
 - `tools.urlContext`: off/default，Anthropic 还可选 20250910/20260209。
 - `tools.mixed`: 是否允许原生工具与函数工具混用，默认 false。能力档模式下，UI 不再依据 MCP 模式、服务器数量或残留的 function 选择阻止开启原生工具，也不自动改写搜索开关；发送前按工具注入后的实际集合校验。真实冲突会报错，不会带着冲突工具发送。未配置能力档的原版 UI 限制保持不变。
-- `tools.unavailableWith`: 不能与原生工具同时使用的思考选项 ID，也可包含 default。引用的非 default 选项必须存在于 reasoning。UI 和请求按同一个有效选项检查。
+- `tools.unavailableWith`: 不能与原生工具同时使用的思考选项 ID，也可包含 default。引用的非 default 选项必须存在于 reasoning。UI 和请求按同一个有效选项检查。`tools.choice=none` 时不发送原生工具，UI 不会因残留的工具开关状态阻止选择档位；开关保存值仍保留，恢复 auto 后重新检查真实组合。
 - `googleCapabilities`: Gemini SDK 的显式能力覆盖。`supportsGemini2Tools` 控制 Search/URL Context；`usesGemini3Features` 控制新式消息/工具转换。它不是模型 ID，不进入 HTTP 请求体。等级模板设为 true/true，预算模板设为 true/false；必须按实际渠道能力调整。Gemini 声明原生工具或 mixed 时必须填写该对象；Search/URL Context 要求 supportsGemini2Tools=true，mixed 要求 usesGemini3Features=true。
 
 自定义标准参数（如 temperature、topP、maxOutputTokens）必须作为独立顶层参数填写，不可藏在 openai/openaiCompatible/google/anthropic 对象里。命名空间内的标准参数会明确报错，而不是绕过采样限制。已有不满足新增校验的配置请修正后重新保存。
@@ -300,5 +300,7 @@ git push origin compat-v1.9.12
 上述生成补丁路径不存在时不要跳过，先完成依赖准备。不要使用 `git add -A` 混入其他工作区文件或凭据；本说明没有替你执行提交。
 
 ## 验证边界
+
+用户已确认前一次模板类型修复后的 GitHub 构建成功；这不等于后续 C02/C03/C04 修复已通过构建。本轮没有修改已成功构建的 SDK 版本、锁文件、补丁脚本或工作流，提交后沿用现有 CI 验证。
 
 本次仅人工静态审查，没有安装、编译、类型检查、lint、格式化命令、测试或渠道请求。不能把源码审查等同于构建通过、服务端功能通过或零回归。请至少在你后续使用构建产物时检查：真实 URL/model 不变；菜单改变最终请求；默认与关闭不同；tools 确实存在；异常会提示；原模型及多轮工具请求无异常。

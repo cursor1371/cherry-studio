@@ -128,7 +128,8 @@ export const useWebSearchPanelController = (assistantId: string, quickPanelContr
     if (
       update.enableWebSearch &&
       (profile
-        ? profile.tools.unavailableWith.includes(getProfileEffort(profile, assistant.settings?.reasoning_effort))
+        ? profile.tools.choice !== 'none' &&
+          profile.tools.unavailableWith.includes(getProfileEffort(profile, assistant.settings?.reasoning_effort))
         : isOpenAIWebSearchModel(model) && isGPT5SeriesReasoningModel(model) &&
           assistant.settings?.reasoning_effort === 'minimal')
     ) {

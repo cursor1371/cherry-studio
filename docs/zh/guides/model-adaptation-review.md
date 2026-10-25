@@ -1,6 +1,107 @@
 # 模型能力适配：修改与人工静态复审报告
 
-## 最新复审：连续 TS2322/TS2345 构建失败与原版对照
+## 最新复审：构建成功后的 C02/C03 修复及关联回归检查
+
+### 状态与结论
+
+用户已确认上一轮模板类型修复后的 GitHub 构建成功。该反馈证明上一版构建阻塞已解除，不代表本轮新增修改已编译或通过真实渠道验证。
+
+本轮已修复 C02、C03，并同步修正关联检查发现的 C04（tools.choice=none 时 UI 仍误报原生工具与思考档位冲突）。完整回读本轮六个修改后的应用文件、核对原版供应商解析和关联参数/工具链后，未发现这些修复范围内尚未处理的明确阻断性问题。结论仅为人工静态审查，不是全项目无缺陷或零回归证明。
+
+未安装依赖，未运行准备脚本、类型检查、编译、测试、lint、格式化或 Git 命令；没有新增测试、运行时文件或修改依赖。
+
+### 最小修改清单
+
+六个现有应用源码文件、两份既有文档：
+
+```text
+src/renderer/src/aiCore/AiProvider.ts
+src/renderer/src/aiCore/provider/providerConfig.ts
+src/renderer/src/aiCore/plugins/modelProfilePlugin.ts
+src/renderer/src/pages/home/Inputbar/tools/components/ThinkingButton.tsx
+src/renderer/src/pages/home/Inputbar/tools/components/UrlContextbutton.tsx
+src/renderer/src/pages/home/Inputbar/tools/components/WebSearchQuickPanelManager.tsx
+docs/zh/guides/model-adaptation.md
+docs/zh/guides/model-adaptation-review.md
+```
+
+这些文件已经全部包含在累计清单和 Actions 源码附件中，无须改工作流或增加清单条目。没有修改模型 ID、协议 Schema、默认模板、持久化结构、主进程、SDK 补丁或依赖锁文件。
+
+### C02：非文本入口复用聊天能力档（已修复）
+
+- AiProvider 保留构造时的原始 sourceProvider，包括调用方轮换后的 API Key 和尚未被聊天协议改写的地址。
+- 构造器不再提前创建 SDK 配置；文本 completions 懒加载并独占原 config 缓存。同步/异步供应商配置都在实际操作的 await 路径处理。
+- getEmbeddingDimensions 从 sourceProvider 按原规则格式化，再以 useModelProfile=false 构建 SDK 配置。
+- 原 ensureConfig 改为返回局部 ProviderConfig 的 getImageConfig，生成/编辑图像都使用它。优先匹配构造模型和完整模型 ID，保留原有基础名称匹配作为回退。请求仍使用调用方的原始模型 ID。
+- 模型列表同样从原始渠道解析，不继承已选择模型的聊天协议地址。
+- providerToAiSdkConfig 只增加可选参数 useModelProfile，默认保持当前文本调用行为；false 跳过能力档，其余原版配置 builders 保留。
+- 非文本方法不再写 actualProvider 或文本 config。同一实例先聊天后绘图/嵌入、先嵌入后聊天都不会串用配置。
+- 这是用途边界修复，不是升级旧图像/嵌入适配器。原模型是否具备这些能力，仍由原版供应商和服务端决定。
+
+### C03：无提示词工具时工具选择误报（已修复）
+
+modelProfilePlugin 在 post 参数阶段取得 hasPromptTools，来源为 Object.keys(requestContext.mcpTools ?? {}).length。JSON 冲突检查和 toolChoice 检查复用此实际集合判断。
+
+- prompt 模式但集合为空：none 不再报错；原生工具的 required/指定名称继续由后面的协议和工具存在性检查处理。
+- 集合非空（包括转换后的外部搜索、知识库、记忆）：仍拒绝非 auto 的原生工具控制，不能把清空 params.tools 冒充清除了 XML 提示词工具。
+- 未放宽 functionCalling=false、mixed=false、Anthropic thinking 强制工具限制或 Gemini 内置工具强制选择限制。
+- 未配置档的模型不经过该插件。
+
+### C04：choice=none 后的 UI 档位冲突误判（关联审查发现，已修复）
+
+触发：能力档设 tools.choice=none，保留 webSearch/urlContext 声明及 unavailableWith，助手也保留了开启工具的状态。请求插件会移除工具，但思考按钮、搜索面板和 URL Context 开关仍按残留状态提示档位冲突。
+
+三处 UI 判断现在只在 tools.choice 不为 none 时检查该组合。没有新增规则函数或改写保存值；工具开关仍表示用户偏好，none 对实际请求的禁用优先级不变。恢复 auto/删除 choice 后恢复冲突检查。发送层仍以调用方最终 choice 和真实工具集合校验，未删除任何实际请求保护。
+
+### 同步审查范围与排除项
+
+本轮完整读取相关文件，而非只搜索报错片段：
+
+- 供应商与调用：AiProvider、providerConfig、profile extensions、ApiService、middlewareConfig。
+- 参数与配置：modelProfile Schema、modelProfiles 模板、modelParameters、parameterBuilder、options、自定义参数分类类型。
+- 插件链：PluginBuilder、modelProfilePlugin、searchOrchestrationPlugin、anthropicCachePlugin，以及 aiCore PluginManager、PluginEngine、promptToolUsePlugin、StreamEventManager。
+- UI/输入：能力档编辑器、助手模型设置、useAssistant、工具能力辅助函数、三个本轮工具组件、modelCapabilities、PDF 插件和 messageConverter。
+- 交付：累计清单、既有文档、build-custom.yml。
+- 在线对照官方 v1.9.12 的 AiProvider.ts 和 provider/providerConfig.ts，确认原 adaptProvider 不按模型改写地址、旧配置 builders 与图像/嵌入请求参数的关系。
+
+没有执行 Git 差异扫描，也没有声称再次逐个读取累计清单之外的全部代码或所有 SDK 源码。不是全仓库逐字节对照。
+
+额外核查结论：
+
+1. 提示词插件在能力档之前保存 originalParams，递归调用重新经过参数链；当前路径没有将已扣预算的结果写回该快照，因此没有证据支持“递归每轮重复扣 Anthropic 预算”的疑虑，未添加修补逻辑。
+2. 标题/总结/连接检查仍属于文本 completions，继续使用所选协议；output 和能力档 tools.choice 仍限定 callType=chat，不因 C02 退回错误协议。
+3. API Key 轮换仍由调用方完成，新的非文本解析使用传入的同一原始渠道，不从 store 重新读取未轮换的 Key。
+4. 标准参数禁用仍用 undefined 覆盖，符合现有插件管理器的浅合并契约；JSON 的提示词工具冲突与 Anthropic outputFormat 限制保留。
+5. 原版配置 builders、旧供应商包、文件转换、Agent 和历史消息存储没有在本轮重写。共享依赖的风险不能仅通过这些源码分支推断为零。
+
+### 静态场景矩阵（未执行测试）
+
+| 场景 | 源码推演结果 |
+| --- | --- |
+| openai 渠道 + Gemini 聊天能力档，调用 completions | 继续使用 profile-google 和聊天格式化地址 |
+| 同模型独立 generateImage/editImage | 使用原渠道格式化地址及旧 SDK，不进入 profile 扩展 |
+| 同实例先 completions 后嵌入/图像 | 非文本局部配置不读取/覆盖文本 config |
+| 同实例先嵌入后 completions | 嵌入不填充文本缓存，completions 自行初始化 |
+| 仅 provider 构造 + 图像请求 | 查找请求对应模型，再按原渠道生成配置 |
+| 未绑定能力档模型 | 继续使用原版 SDK builders；配置改为执行时初始化 |
+| prompt 模式 + 无实际工具 + choice=none | 允许，工具声明为空 |
+| prompt 模式 + 无实际工具 + choice=required | 仍须有合法可强制选择的工具，否则明确报错 |
+| 实际提示词工具 + choice=none/required/指定名称 | 明确拒绝，不能绕过提示词执行链 |
+| 实际提示词工具 + JSON 输出 | 仍拒绝 |
+| choice=none + 残留原生工具开关 + unavailableWith 命中 | UI 不再误报档位冲突，请求不注入工具 |
+| 恢复 choice=auto + 真正冲突组合 | UI 和请求检查重新生效 |
+
+### 保留限制和后续验证
+
+- 本轮源码仍需下一次 CI 做类型检查和构建；上一版成功不自动覆盖这些变更。
+- 用户已报告云端成功，不再把“未运行依赖准备”作为云端构建阻塞结论。本轮没有读取该次构建附件或验证本地已固化所有生成依赖；建议保留同次运行的依赖附件，按既有流程审查后入库。
+- 没有实际调用图像、嵌入、聊天或渠道工具，不能保证服务端接受所有能力声明。
+- Web Fetch 文档定位引用仍属已声明降级；完整跨轮 reasoning/工具元数据、Agent 和高级平台功能不在本轮范围。
+- 原版也存在的功能限制未被无关重构；本次发现并修正的是上述具体适配接入问题，不是宣称消除了全项目所有潜在异常。
+
+---
+
+## 历史复审：连续 TS2322/TS2345 构建失败与原版对照
 
 ### 结论
 

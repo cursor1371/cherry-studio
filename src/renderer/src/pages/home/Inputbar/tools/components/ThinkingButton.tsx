@@ -77,7 +77,7 @@ const ThinkingButton: FC<Props> = ({
     (option: ThinkingOption) => {
       const isEnabled = option !== 'none'
 
-      if (profile && profile.tools.unavailableWith.includes(option) &&
+      if (profile && profile.tools.choice !== 'none' && profile.tools.unavailableWith.includes(option) &&
           ((profile.tools.webSearch !== 'off' && !assistant.webSearchProviderId && assistant.enableWebSearch) ||
             (profile.tools.urlContext !== 'off' && assistant.enableUrlContext))) {
         window.toast.warning(t('models.profile.tools_effort', {
