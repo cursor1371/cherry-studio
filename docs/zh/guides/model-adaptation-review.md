@@ -1,6 +1,109 @@
 # 模型能力适配：修改与人工静态复审报告
 
-## 最新复审：R01–R05 最小修正
+## 最新复审：连续 TS2322/TS2345 构建失败与原版对照
+
+### 结论
+
+本次修复 `config/modelProfiles.ts` 的模板构造类型错误。此前仅为 `map()` 添加泛型的修复不足：用户的新 CI 日志证明回调返回值仍被推断为异构对象联合类型，包含可选 `undefined` 属性，与 `Record<string, JSONType>` 不兼容。
+
+**当前不能确认整个适配设计无误，也不能把本次静态修复标记为构建通过。** 除编译问题外，本次确认了下述两个条件性接入问题，未将它们混入本次类型修复。已有历史状态和依赖交付限制仍保留。
+
+### 本轮实际操作与范围
+
+- 完整读取 `model-adaptation-files.txt` 所列 38 个源码/构建文件及 3 份文档；另读仓库约定、Web tsconfig、插件管理器、提示词工具及递归事件管理器。
+- 在线读取官方 `v1.9.12` 的 `providerConfig.ts`、`parameterBuilder.ts`、`modelParameters.ts`、`PluginBuilder.ts`、`AiProvider.ts`、`useAssistant.ts`，对照关键入口、原分支和接口签名。
+- 原版对照不是全仓库逐字节 diff：当前工具不能执行 Git；Fork 比较 API 返回 404，未取得远端完整差异。不能保证人工清单之外无修改，不能声称每个既有文件都与标签逐行比对。
+- 读取锁文件前 100 行核对 overrides 和 patchedDependencies，并列出 patches 目录；没有完整审计全部传递依赖。
+- 本轮仅修改 `src/renderer/src/config/modelProfiles.ts` 与本报告。没有修改依赖、锁文件、构建检查、SDK 补丁脚本或其他运行时代码。
+- 未安装依赖，未运行 pnpm/编译/类型检查/测试/lint/格式化命令；没有新增测试文件或执行 Git 提交。
+
+### C01：模板构造的 JSON 类型错误（本轮已修复，待 CI 确认）
+
+原错误与 SDK 协议序列化无关，也不是日志中的 npm 环境变量警告造成的。
+
+不同协议分支直接从 `map()` 返回形状不同的对象，回调返回类型被合成为联合类型；其他分支不存在的键在推断类型中表现为可选 undefined。这里是静态类型问题，不表示运行时对象真的被填入这些键。
+
+本轮不再依赖回调返回值推断：
+
+1. 声明 `reasoning: ModelProfile['reasoning']`。
+2. 遍历显式的 `[档位, 预算]` 只读元组，避免并行数组索引。
+3. 每次创建 `parameters: ModelProfile['reasoning'][number]['parameters'] = {}`。
+4. 按协议分支写入 JSON 属性，最后只执行 `reasoning.push({ id, parameters })`。
+
+没有使用 any、@ts-ignore、双重断言、允许 undefined 的新类型或降低严格检查。Gemini 的 level/budget、Anthropic 的 adaptive/budget 和 OpenAI effort 的键、值、顺序均保持不变；后续 full 模板的候选项也未改变。
+
+静态核对：
+
+| 分支 | 保持的参数 |
+| --- | --- |
+| Gemini level | includeThoughts=true，thinkingLevel=low/medium/high |
+| Gemini budget | includeThoughts=true，thinkingBudget=2048/4096/8192 |
+| Anthropic adaptive | thinking.type=adaptive，display=summarized，effort=对应档位 |
+| Anthropic budget | thinking.type=enabled，budgetTokens=2048/4096/8192 |
+| OpenAI Chat/Responses | reasoningEffort=对应档位 |
+
+这移除了日志指出的联合类型构造点；实际 native-preview 类型检查结果仍须下一次 CI 确认。
+
+### C02：聊天能力档的供应商选择未完全隔离非聊天操作（中优先级，未修复）
+
+位置：`aiCore/provider/providerConfig.ts` 的 adaptProvider/providerToAiSdkConfig；`aiCore/AiProvider.ts` 的构造器、ensureConfig、getEmbeddingDimensions、generateImage、editImage。
+
+原版所有操作共用供应商配置。当前能力档在该共享入口直接切换到 profile-* 供应商和相应协议地址，但没有请求用途参数；图像和嵌入方法复用同一个 config。新 profile 扩展又明确标记 supportsImageGeneration=false。
+
+触发条件：某个渠道/模型绑定聊天能力档后，同一个模型又被用于独立绘图或嵌入入口。即使普通聊天的图像按钮已隐藏，这些公开方法仍可能采用聊天能力档选择的 SDK/地址，而不是原版配置。不是所有图像/嵌入请求都会受影响，未绑定能力档的模型不走此分支。
+
+因此，“未配置模型保留原路径”成立，不等于“为模型配置聊天能力后，它在所有其他用途完全不受影响”。这是原版共享供应商结构与新增聊天覆盖之间的边界缺口。
+
+建议：在执行用途边界选择能力档（仅文本 completions），独立图像/嵌入按原始渠道配置解析；或明确禁止对非聊天用途模型启用能力档。不要通过继续扩大模型 ID 白名单处理。
+
+### C03：工具选择校验仍基于模式而非实际提示词工具（中优先级，未修复）
+
+位置：`aiCore/plugins/modelProfilePlugin.ts`，`const choice` 后的判断。
+
+当前代码仍为 `config.isPromptToolUse && choice !== undefined && choice !== 'auto'` 时直接抛错。即使 requestContext.mcpTools 为空，且原生搜索/抓取也关闭，配置 `tools.choice=none` 仍被拒绝。用户仅使用原生搜索、无实际提示词工具时的强制选择也可能被此判断提前阻止。
+
+R01 的 JSON 冲突检查已经使用实际 requestContext，但此处没有同步。因此，报告中“没有实际提示词工具时不误报”只适用于 JSON 冲突检查，不能推广到全部工具选择检查。
+
+建议：此处也检查提示词插件实际保存的工具集合；无实际提示词工具时继续正常执行协议工具选择校验。实际存在提示词工具时，对无法实现的控制继续明确拒绝，不通过删除工具声明假装关闭 XML 提示词工具。
+
+### 已核实的设计关系
+
+- 能力档使用渠道 + 完整模型 ID 查找，不伪造传输 ID；Schema 与请求插件共享配置。
+- 新供应商使用独立 registry ID；未启用配置时，已对照的 provider/parameter/plugin 原路径保留。
+- 普通参数、供应商参数、原生工具分别进入各自 SDK 层，不采用任意 HTTP JSON 后处理。
+- 参数插件是 post；提示词工具插件 normal 先保存 requestContext.mcpTools，原生工具再由能力档插件创建。
+- 参数插件返回显式 undefined 清除被禁用字段，适合原版 PluginManager 的浅合并契约。
+- JSON 输出仅按 callType=chat 启用；对应聊天响应跳过链接改写，PluginBuilder 跳过文本 reasoning 标签提取。
+- R02 原生 outputFormat 约束、R03 文档引用降级、R04 实际工具混用末端校验、R05 普通聊天图像入口限制仍存在。
+- Session 思考按钮使用 builtin 判断；这不构成对所有 Session 调用点的零回归证明。
+- 历史 messageConverter 仍主要重建文本、thinking 文本和部分 Gemini 签名，没有完整恢复各协议推理/工具项目。本次不扩展该已声明边界。
+
+### 依赖与 CI 状态的更正
+
+用户提供的新日志已经显示：node 与 aiCore 类型检查返回 0，Web 检查失败于 C01。不能再把本次失败归为未安装 SDK 或尚未执行依赖准备。日志中的 npm Unknown env config 是警告，不是当前阻塞点。
+
+本地工作树仍未纳入新 Google/OpenAI 补丁，锁文件 override 仍是 provider-utils 4.0.23，而 package.json 为 4.0.62。云端工作流会先准备依赖再构建，因此本地缺少生成文件与云端已经进入类型检查可以同时成立。本轮未读取那次 Actions 的生成附件，不能确认云端全部依赖差异；应取回同一次运行的 model-sdk-dependencies 附件审查后固化。不要为了 C01 修改 SDK 版本、删除锁文件或绕过 typecheck。
+
+公共 ai/provider/provider-utils 的升级仍影响旧供应商，npm 别名并存不代表公共运行时完全隔离。后续需验证普通文本、工具续轮及未配置模型的原功能。
+
+### 原版对照来源
+
+以下链接均为本轮实际读取的标签文件，不是主分支：
+
+- https://github.com/CherryHQ/cherry-studio/blob/v1.9.12/src/renderer/src/aiCore/provider/providerConfig.ts
+- https://github.com/CherryHQ/cherry-studio/blob/v1.9.12/src/renderer/src/aiCore/prepareParams/parameterBuilder.ts
+- https://github.com/CherryHQ/cherry-studio/blob/v1.9.12/src/renderer/src/aiCore/prepareParams/modelParameters.ts
+- https://github.com/CherryHQ/cherry-studio/blob/v1.9.12/src/renderer/src/aiCore/plugins/PluginBuilder.ts
+- https://github.com/CherryHQ/cherry-studio/blob/v1.9.12/src/renderer/src/aiCore/AiProvider.ts
+- https://github.com/CherryHQ/cherry-studio/blob/v1.9.12/src/renderer/src/hooks/useAssistant.ts
+
+### 验收意见
+
+C01 已修改源代码并人工回读，等待新的 CI 结果。协议驱动方案本身可保留，但 C02/C03 未处理，加之未验证的生成依赖和运行行为，不能确认整体设计无误或完整适配通过。本轮没有将审查发现静默当作已经修复。
+
+---
+
+## 历史复审：R01–R05 最小修正
 
 ### 结论与验证等级
 

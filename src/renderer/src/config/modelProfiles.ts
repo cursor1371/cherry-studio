@@ -40,19 +40,32 @@ export const profileNamespaces = {
 } as const
 
 export function createModelProfile(protocol: ProfileProtocol, budget = false, full = false): ModelProfile {
-  const reasoning = (['low', 'medium', 'high'] as const).map<ModelProfile['reasoning'][number]>((id, index) => {
-    const tokens = [2048, 4096, 8192][index]
+  const reasoning: ModelProfile['reasoning'] = []
+  for (const [id, tokens] of [['low', 2048], ['medium', 4096], ['high', 8192]] as const) {
+    // Build JSON values directly: inferring heterogeneous callback returns creates
+    // optional undefined properties, which are not valid JSON parameter values.
+    const parameters: ModelProfile['reasoning'][number]['parameters'] = {}
     switch (protocol) {
       case 'gemini':
-        return { id, parameters: { thinkingConfig: { includeThoughts: true, ...(budget ? { thinkingBudget: tokens } : { thinkingLevel: id }) } } }
+        if (budget) {
+          parameters.thinkingConfig = { includeThoughts: true, thinkingBudget: tokens }
+        } else {
+          parameters.thinkingConfig = { includeThoughts: true, thinkingLevel: id }
+        }
+        break
       case 'anthropic':
-        return { id, parameters: budget
-          ? { thinking: { type: 'enabled', budgetTokens: tokens } }
-          : { thinking: { type: 'adaptive', display: 'summarized' }, effort: id } }
+        if (budget) {
+          parameters.thinking = { type: 'enabled', budgetTokens: tokens }
+        } else {
+          parameters.thinking = { type: 'adaptive', display: 'summarized' }
+          parameters.effort = id
+        }
+        break
       default:
-        return { id, parameters: { reasoningEffort: id } }
+        parameters.reasoningEffort = id
     }
-  })
+    reasoning.push({ id, parameters })
+  }
   if (full) {
     if (protocol.startsWith('openai')) {
       reasoning.unshift(
