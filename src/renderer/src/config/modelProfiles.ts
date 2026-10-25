@@ -40,7 +40,7 @@ export const profileNamespaces = {
 } as const
 
 export function createModelProfile(protocol: ProfileProtocol, budget = false, full = false): ModelProfile {
-  const reasoning: ModelProfile['reasoning'] = (['low', 'medium', 'high'] as const).map((id, index) => {
+  const reasoning = (['low', 'medium', 'high'] as const).map<ModelProfile['reasoning'][number]>((id, index) => {
     const tokens = [2048, 4096, 8192][index]
     switch (protocol) {
       case 'gemini':
